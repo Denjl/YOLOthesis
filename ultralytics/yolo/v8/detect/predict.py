@@ -123,14 +123,12 @@ def UI_box(x, img, color=None, label=None, line_thickness=None):
 
 
 
-def draw_boxes(img, bbox, names,object_id, identities=None, offset=(0, 0)):
-    #cv2.line(img, line[0], line[1], (46,162,112), 3)
-
+def draw_boxes(img, bbox, names, object_id, identities=None, confidences=None, offset=(0, 0)):
     height, width, _ = img.shape
     # remove tracked point from buffer if object is lost
     for key in list(data_deque):
-      if key not in identities:
-        data_deque.pop(key)
+        if key not in identities:
+            data_deque.pop(key)
 
     for i, box in enumerate(bbox):
         x1, y1, x2, y2 = [int(i) for i in box]
@@ -140,21 +138,23 @@ def draw_boxes(img, bbox, names,object_id, identities=None, offset=(0, 0)):
         y2 += offset[1]
 
         # code to find center of bottom edge
-        center = (int((x2+x1)/ 2), int((y2+y2)/2))
+        center = (int((x2 + x1) / 2), int((y2 + y2) / 2))
 
         # get ID of object
         id = int(identities[i]) if identities is not None else 0
 
         # create new buffer for new object
-        if id not in data_deque:  
-          data_deque[id] = deque(maxlen= 64)
+        if id not in data_deque:
+            data_deque[id] = deque(maxlen=64)
         color = compute_color_for_labels(object_id[i])
         obj_name = names[object_id[i]]
-        label = '{}{:d}'.format("", id) + ":"+ '%s' % (obj_name)
+        conf = confidences[i] if confidences is not None else 0
+        label = '{}{:d}'.format("", id) + ":" + '%s %.2f' % (obj_name, conf)
 
         # add center to buffer
         data_deque[id].appendleft(center)
         UI_box(box, img, label=label, color=color, line_thickness=2)
+
         # draw trail
         for i in range(1, len(data_deque[id])):
             # check if on buffer value is none
@@ -165,7 +165,7 @@ def draw_boxes(img, bbox, names,object_id, identities=None, offset=(0, 0)):
             # draw trails
             cv2.line(img, data_deque[id][i - 1], data_deque[id][i], color, thickness)
 
-        ## Display occlusion status
+        # Display occlusion status
         occlusion_status = deepsort.get_occlusion_status(id)
         if occlusion_status:
             cv2.putText(img, "Occluded", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2, cv2.LINE_AA)
@@ -201,7 +201,7 @@ class DetectionPredictor(BasePredictor):
         p, im, im0 = batch
         all_outputs = []
         log_string = ""
-        occluded_objects = []  ## List to store occluded objects
+        occluded_objects = []  # List to store occluded objects
 
         if len(im.shape) == 3:
             im = im[None]  # expand for batch dim
@@ -236,29 +236,35 @@ class DetectionPredictor(BasePredictor):
             x_c, y_c, bbox_w, bbox_h = xyxy_to_xywh(*xyxy)
             xywh_obj = [x_c, y_c, bbox_w, bbox_h]
             xywh_bboxs.append(xywh_obj)
-            confs.append([conf.item()])
+            confs.append(conf.item())
             oids.append(int(cls))
         xywhs = torch.Tensor(xywh_bboxs)
         confss = torch.Tensor(confs)
-          
+
         outputs = deepsort.update(xywhs, confss, oids, im0)
         if len(outputs) > 0:
             bbox_xyxy = outputs[:, :4]
             identities = outputs[:, -2]
             object_id = outputs[:, -1]
-            
-            draw_boxes(im0, bbox_xyxy, self.model.names, object_id,identities)
 
-            ## Log occluded objects
+            # Create a dictionary to map track IDs to confidence scores
+            track_confidences = {track_id: conf for track_id, conf in zip(identities, confs)}
+
+            # Align confidences with tracked objects
+            aligned_confs = [track_confidences.get(track_id, 0) for track_id in identities]
+
+            draw_boxes(im0, bbox_xyxy, self.model.names, object_id, identities, confidences=aligned_confs)
+
+            # Log occluded objects
             for i, track_id in enumerate(identities):
                 if deepsort.get_occlusion_status(track_id):
                     occluded_objects.append({
-                        'track_id': int(track_id),
-                        'bbox': [int(coord) for coord in bbox_xyxy[i]],
-                        'class': self.model.names[int(object_id[i])]
+                        'track_id': int(track_id),  # Convert to regular int
+                        'bbox': [int(coord) for coord in bbox_xyxy[i]],  # Convert to regular int
+                        'class': self.model.names[int(object_id[i])]  # Convert to regular int
                     })
 
-        ## Save occluded objects to a file (optional)
+        # Save occluded objects to a file (optional)
         if occluded_objects:
             with open(self.save_dir / 'occluded_objects.json', 'a') as f:
                 json.dump(occluded_objects, f)

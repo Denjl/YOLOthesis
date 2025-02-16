@@ -130,6 +130,19 @@ def draw_boxes(img, bbox, names, object_id, identities=None, confidences=None, o
         if key not in identities:
             data_deque.pop(key)
 
+    # Draw 8x8 grid
+    num_rows, num_cols = 8, 8
+    row_height = height // num_rows
+    col_width = width // num_cols
+
+    for i in range(1, num_rows):
+        y = i * row_height
+        cv2.line(img, (0, y), (width, y), (255, 255, 255), 1)
+
+    for j in range(1, num_cols):
+        x = j * col_width
+        cv2.line(img, (x, 0), (x, height), (255, 255, 255), 1)        
+
     for i, box in enumerate(bbox):
         x1, y1, x2, y2 = [int(i) for i in box]
         x1 += offset[0]
@@ -202,6 +215,7 @@ class DetectionPredictor(BasePredictor):
         all_outputs = []
         log_string = ""
         occluded_objects = []  # List to store occluded objects
+        occlusion_coords = []  # List to store occlusion coordinates
 
         if len(im.shape) == 3:
             im = im[None]  # expand for batch dim
@@ -263,12 +277,23 @@ class DetectionPredictor(BasePredictor):
                         'bbox': [int(coord) for coord in bbox_xyxy[i]],  # Convert to regular int
                         'class': self.model.names[int(object_id[i])]  # Convert to regular int
                     })
+                    # Log the center of the bounding box as the occlusion coordinate
+                    x_center = (bbox_xyxy[i][0] + bbox_xyxy[i][2]) // 2
+                    y_center = (bbox_xyxy[i][1] + bbox_xyxy[i][3]) // 2
+                    occlusion_coords.append((x_center, y_center))
 
         # Save occluded objects to a file (optional)
         if occluded_objects:
             with open(self.save_dir / 'occluded_objects.json', 'a') as f:
                 json.dump(occluded_objects, f)
                 f.write('\n')
+
+        # Save occlusion coordinates to a file
+        if occlusion_coords:
+            with open(self.save_dir / 'occlusion_coords.json', 'a') as f:
+                # json.dump(occlusion_coords, f)
+                json.dump([(int(x), int(y)) for x, y in occlusion_coords], f)
+                f.write('\n')        
 
         return log_string
 

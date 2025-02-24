@@ -130,8 +130,8 @@ def draw_boxes(img, bbox, names, object_id, identities=None, confidences=None, o
         if key not in identities:
             data_deque.pop(key)
 
-    # Draw 8x8 grid
-    num_rows, num_cols = 8, 8
+    # Draw 16x16 grid
+    num_rows, num_cols = 16, 16
     row_height = height // num_rows
     col_width = width // num_cols
 
@@ -188,6 +188,10 @@ def draw_boxes(img, bbox, names, object_id, identities=None, confidences=None, o
 
 class DetectionPredictor(BasePredictor):
 
+    def __init__(self, cfg):
+        super().__init__(cfg)
+        self.first_appearance = {}  # Initialize first_appearance attribute
+
     def get_annotator(self, img):
         return Annotator(img, line_width=self.args.line_thickness, example=str(self.model.names))
 
@@ -216,6 +220,7 @@ class DetectionPredictor(BasePredictor):
         log_string = ""
         occluded_objects = []  # List to store occluded objects
         occlusion_coords = []  # List to store occlusion coordinates
+        first_appearance_coords = []  # List to store first appearance coordinates
 
         if len(im.shape) == 3:
             im = im[None]  # expand for batch dim
@@ -247,40 +252,47 @@ class DetectionPredictor(BasePredictor):
         oids = []
         outputs = []
         for *xyxy, conf, cls in reversed(det):
+            if int(cls) != 0:  # Filter to keep only "car" class (class ID 2), people is "0"
+                continue
             x_c, y_c, bbox_w, bbox_h = xyxy_to_xywh(*xyxy)
             xywh_obj = [x_c, y_c, bbox_w, bbox_h]
             xywh_bboxs.append(xywh_obj)
             confs.append(conf.item())
             oids.append(int(cls))
-        xywhs = torch.Tensor(xywh_bboxs)
-        confss = torch.Tensor(confs)
+        if len(xywh_bboxs) > 0:  # Check if there are any detections
+            xywhs = torch.Tensor(xywh_bboxs)
+            confss = torch.Tensor(confs)
 
-        outputs = deepsort.update(xywhs, confss, oids, im0)
-        if len(outputs) > 0:
-            bbox_xyxy = outputs[:, :4]
-            identities = outputs[:, -2]
-            object_id = outputs[:, -1]
+            outputs = deepsort.update(xywhs, confss, oids, im0)
+            if len(outputs) > 0:
+                bbox_xyxy = outputs[:, :4]
+                identities = outputs[:, -2]
+                object_id = outputs[:, -1]
 
-            # Create a dictionary to map track IDs to confidence scores
-            track_confidences = {track_id: conf for track_id, conf in zip(identities, confs)}
+                # Create a dictionary to map track IDs to confidence scores
+                track_confidences = {track_id: conf for track_id, conf in zip(identities, confs)}
 
-            # Align confidences with tracked objects
-            aligned_confs = [track_confidences.get(track_id, 0) for track_id in identities]
+                # Align confidences with tracked objects
+                aligned_confs = [track_confidences.get(track_id, 0) for track_id in identities]
 
-            draw_boxes(im0, bbox_xyxy, self.model.names, object_id, identities, confidences=aligned_confs)
+                draw_boxes(im0, bbox_xyxy, self.model.names, object_id, identities, confidences=aligned_confs)
 
-            # Log occluded objects
-            for i, track_id in enumerate(identities):
-                if deepsort.get_occlusion_status(track_id):
-                    occluded_objects.append({
-                        'track_id': int(track_id),  # Convert to regular int
-                        'bbox': [int(coord) for coord in bbox_xyxy[i]],  # Convert to regular int
-                        'class': self.model.names[int(object_id[i])]  # Convert to regular int
-                    })
-                    # Log the center of the bounding box as the occlusion coordinate
-                    x_center = (bbox_xyxy[i][0] + bbox_xyxy[i][2]) // 2
-                    y_center = (bbox_xyxy[i][1] + bbox_xyxy[i][3]) // 2
-                    occlusion_coords.append((x_center, y_center))
+                # Log occluded objects and first appearance coordinates
+                for i, track_id in enumerate(identities):
+                    if deepsort.get_occlusion_status(track_id):
+                        occluded_objects.append({
+                            'track_id': int(track_id),  # Convert to regular int
+                            'bbox': [int(coord) for coord in bbox_xyxy[i]],  # Convert to regular int
+                            'class': self.model.names[int(object_id[i])]  # Convert to regular int
+                        })
+                        # Log the center of the bounding box as the occlusion coordinate
+                        x_center = (bbox_xyxy[i][0] + bbox_xyxy[i][2]) // 2
+                        y_center = (bbox_xyxy[i][1] + bbox_xyxy[i][3]) // 2
+                        occlusion_coords.append((x_center, y_center))
+                    # Log the first appearance coordinates
+                    if track_id not in self.first_appearance:
+                        self.first_appearance[track_id] = (bbox_xyxy[i][0] + bbox_xyxy[i][2]) // 2, (bbox_xyxy[i][1] + bbox_xyxy[i][3]) // 2
+                        first_appearance_coords.append(self.first_appearance[track_id])
 
         # Save occluded objects to a file (optional)
         if occluded_objects:
@@ -291,9 +303,14 @@ class DetectionPredictor(BasePredictor):
         # Save occlusion coordinates to a file
         if occlusion_coords:
             with open(self.save_dir / 'occlusion_coords.json', 'a') as f:
-                # json.dump(occlusion_coords, f)
                 json.dump([(int(x), int(y)) for x, y in occlusion_coords], f)
-                f.write('\n')        
+                f.write('\n')
+
+        # Save first appearance coordinates to a file
+        if first_appearance_coords:
+            with open(self.save_dir / 'first_appearance_coords.json', 'a') as f:
+                json.dump([(int(x), int(y)) for x, y in first_appearance_coords], f)
+                f.write('\n')
 
         return log_string
 

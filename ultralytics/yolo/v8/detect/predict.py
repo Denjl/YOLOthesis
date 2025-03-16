@@ -191,6 +191,7 @@ class DetectionPredictor(BasePredictor):
     def __init__(self, cfg):
         super().__init__(cfg)
         self.first_appearance = {}  # Initialize first_appearance attribute
+        self.previous_positions = {}  # Initialize previous positions attribute
 
     def get_annotator(self, img):
         return Annotator(img, line_width=self.args.line_thickness, example=str(self.model.names))
@@ -221,6 +222,7 @@ class DetectionPredictor(BasePredictor):
         occluded_objects = []  # List to store occluded objects
         occlusion_coords = []  # List to store occlusion coordinates
         first_appearance_coords = []  # List to store first appearance coordinates
+        movement_directions = {}  # Dictionary to store movement directions for each grid cell
 
         if len(im.shape) == 3:
             im = im[None]  # expand for batch dim
@@ -252,7 +254,7 @@ class DetectionPredictor(BasePredictor):
         oids = []
         outputs = []
         for *xyxy, conf, cls in reversed(det):
-            if int(cls) != 0:  # Filter to keep only "car" class (class ID 2), people is "0"
+            if int(cls) != 2:  # Filter to keep only "car" class (class ID 2), people is "0"
                 continue
             x_c, y_c, bbox_w, bbox_h = xyxy_to_xywh(*xyxy)
             xywh_obj = [x_c, y_c, bbox_w, bbox_h]
@@ -294,6 +296,19 @@ class DetectionPredictor(BasePredictor):
                         self.first_appearance[track_id] = (bbox_xyxy[i][0] + bbox_xyxy[i][2]) // 2, (bbox_xyxy[i][1] + bbox_xyxy[i][3]) // 2
                         first_appearance_coords.append(self.first_appearance[track_id])
 
+                    # Track movement direction
+                    current_position = (bbox_xyxy[i][0] + bbox_xyxy[i][2]) // 2, (bbox_xyxy[i][1] + bbox_xyxy[i][3]) // 2
+                    if track_id in self.previous_positions:
+                        prev_position = self.previous_positions[track_id]
+                        dx = current_position[0] - prev_position[0]
+                        dy = current_position[1] - prev_position[1]
+                        direction = self.calculate_direction(dx, dy)
+                        grid_cell = (current_position[1] // (im0.shape[0] // 16), current_position[0] // (im0.shape[1] // 16))
+                        if grid_cell not in movement_directions:
+                            movement_directions[grid_cell] = []
+                        movement_directions[grid_cell].append(direction)
+                    self.previous_positions[track_id] = current_position
+
         # Save occluded objects to a file (optional)
         if occluded_objects:
             with open(self.save_dir / 'occluded_objects.json', 'a') as f:
@@ -312,7 +327,25 @@ class DetectionPredictor(BasePredictor):
                 json.dump([(int(x), int(y)) for x, y in first_appearance_coords], f)
                 f.write('\n')
 
+        # Save movement directions to a file
+        if movement_directions:
+            with open(self.save_dir / 'movement_directions.json', 'a') as f:
+                json.dump({str(k): v for k, v in movement_directions.items()}, f)
+                f.write('\n')
+
         return log_string
+
+    def calculate_direction(self, dx, dy):
+        if abs(dx) > abs(dy):
+            if dx > 0:
+                return "east"
+            else:
+                return "west"
+        else:
+            if dy > 0:
+                return "south"
+            else:
+                return "north"
 
 
 @hydra.main(version_base=None, config_path=str(DEFAULT_CONFIG.parent), config_name=DEFAULT_CONFIG.name)

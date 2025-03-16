@@ -3,7 +3,7 @@ import cv2
 import numpy as np
 from pathlib import Path
 
-def generate_heatmap(coords_file, first_appearance_file, output_file, img_shape, dot_size, grid_size, grid_output_file):
+def generate_heatmap(coords_file, first_appearance_file, movement_directions_file, output_file, img_shape, dot_size, grid_size, grid_output_file):
     # Load occlusion coordinates
     coords = []
     with open(coords_file, 'r') as f:
@@ -15,6 +15,12 @@ def generate_heatmap(coords_file, first_appearance_file, output_file, img_shape,
     with open(first_appearance_file, 'r') as f:
         for line in f:
             first_appearance_coords.extend(json.loads(line))
+
+    # Load movement directions
+    movement_directions = {}
+    with open(movement_directions_file, 'r') as f:
+        for line in f:
+            movement_directions.update(json.loads(line))
 
     # Create an empty heatmap
     heatmap = np.zeros(img_shape[:2], dtype=np.float32)
@@ -47,6 +53,21 @@ def generate_heatmap(coords_file, first_appearance_file, output_file, img_shape,
     for x, y in first_appearance_coords:
         cv2.circle(heatmap, (x, y), dot_size, (0, 255, 0), thickness=-1)
 
+    # Draw movement directions
+    for cell, directions in movement_directions.items():
+        row, col = eval(cell)
+        x = col * col_width + col_width // 2
+        y = row * row_height + row_height // 2
+        direction = max(set(directions), key=directions.count)
+        if direction == "north":
+            cv2.arrowedLine(heatmap, (x, y), (x, y - row_height // 2), (255, 0, 0), 2)
+        elif direction == "south":
+            cv2.arrowedLine(heatmap, (x, y), (x, y + row_height // 2), (255, 0, 0), 2)
+        elif direction == "east":
+            cv2.arrowedLine(heatmap, (x, y), (x + col_width // 2, y), (255, 0, 0), 2)
+        elif direction == "west":
+            cv2.arrowedLine(heatmap, (x, y), (x - col_width // 2, y), (255, 0, 0), 2)
+
     # Save the heatmap
     cv2.imwrite(output_file, heatmap)
 
@@ -64,12 +85,13 @@ def generate_heatmap(coords_file, first_appearance_file, output_file, img_shape,
             f.write('\n')
 
 if __name__ == "__main__":
-    coords_file = "C:/Users/Daniel/PycharmProjects/YOLOv8-DeepSORT-Object-Tracking/runs/detect/train31/occlusion_coords.json"
-    first_appearance_file = "C:/Users/Daniel/PycharmProjects/YOLOv8-DeepSORT-Object-Tracking/runs/detect/train31/first_appearance_coords.json"
-    output_file = "C:/Users/Daniel/PycharmProjects/YOLOv8-DeepSORT-Object-Tracking/runs/detect/train31/heatmap.png"
-    grid_output_file = "C:/Users/Daniel/PycharmProjects/YOLOv8-DeepSORT-Object-Tracking/runs/detect/train31/grid_counts.json"
+    coords_file = "C:/Users/Daniel/PycharmProjects/YOLOv8-DeepSORT-Object-Tracking/runs/detect/train33/occlusion_coords.json"
+    first_appearance_file = "C:/Users/Daniel/PycharmProjects/YOLOv8-DeepSORT-Object-Tracking/runs/detect/train33/first_appearance_coords.json"
+    movement_directions_file = "C:/Users/Daniel/PycharmProjects/YOLOv8-DeepSORT-Object-Tracking/runs/detect/train33/movement_directions.json"
+    output_file = "C:/Users/Daniel/PycharmProjects/YOLOv8-DeepSORT-Object-Tracking/runs/detect/train33/heatmap.png"
+    grid_output_file = "C:/Users/Daniel/PycharmProjects/YOLOv8-DeepSORT-Object-Tracking/runs/detect/train33/grid_counts.json"
     img_shape = (720, 1280, 3)  # Replace with the shape of your video frames
     dot_size = 2
     grid_size = 16
 
-    generate_heatmap(coords_file, first_appearance_file, output_file, img_shape, dot_size, grid_size, grid_output_file)
+    generate_heatmap(coords_file, first_appearance_file, movement_directions_file, output_file, img_shape, dot_size, grid_size, grid_output_file)

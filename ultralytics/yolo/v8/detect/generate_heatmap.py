@@ -161,15 +161,26 @@ def get_squares_between(row1, col1, row2, col2):
 
 
 if __name__ == "__main__":
-    coords_file = "C:/Users/Daniel/PycharmProjects/YOLOv8-DeepSORT-Object-Tracking/runs/detect/train33/occlusion_coords.json"
-    first_appearance_file = "C:/Users/Daniel/PycharmProjects/YOLOv8-DeepSORT-Object-Tracking/runs/detect/train33/first_appearance_coords.json"
-    movement_directions_file = "C:/Users/Daniel/PycharmProjects/YOLOv8-DeepSORT-Object-Tracking/runs/detect/train33/movement_directions.json"
-    output_file = "C:/Users/Daniel/PycharmProjects/YOLOv8-DeepSORT-Object-Tracking/runs/detect/train33/heatmap.png"
-    output_file2 = "C:/Users/Daniel/PycharmProjects/YOLOv8-DeepSORT-Object-Tracking/runs/detect/train33/heatmap2.png"
-    grid_output_file = "C:/Users/Daniel/PycharmProjects/YOLOv8-DeepSORT-Object-Tracking/runs/detect/train33/grid_counts.json"
-    contaminated_output_file = "C:/Users/Daniel/PycharmProjects/YOLOv8-DeepSORT-Object-Tracking/runs/detect/train33/contaminated_squares.json"
-    img_shape = (720, 1280, 3)  # Replace with the shape of your video frames
-    dot_size = 2
-    grid_size = 16
-
-    generate_heatmap(coords_file, first_appearance_file, movement_directions_file, output_file, output_file2, img_shape, dot_size, grid_size, grid_output_file, contaminated_output_file)
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Generate heatmaps from tracking data")
+    parser.add_argument("--save_dir", type=str, required=True, help="Directory containing input files and where to save outputs")
+    parser.add_argument("--img_shape", type=tuple, default=(720, 1280, 3), help="Video frame dimensions")
+    parser.add_argument("--dot_size", type=int, default=2, help="Size of dots on heatmap")
+    parser.add_argument("--grid_size", type=int, default=16, help="Number of grid divisions")
+    
+    args = parser.parse_args()
+    
+    save_dir = Path(args.save_dir)
+    generate_heatmap(
+        coords_file=str(save_dir / "occlusion_coords.json"),
+        first_appearance_file=str(save_dir / "first_appearance_coords.json"),
+        movement_directions_file=str(save_dir / "movement_directions.json"),
+        output_file=str(save_dir / "heatmap.png"),
+        output_file2=str(save_dir / "heatmap2.png"),
+        img_shape=args.img_shape,
+        dot_size=args.dot_size,
+        grid_size=args.grid_size,
+        grid_output_file=str(save_dir / "grid_counts.json"),
+        contaminated_output_file=str(save_dir / "contaminated_squares.json")
+    )

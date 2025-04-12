@@ -15,6 +15,7 @@ from ultralytics.yolo.engine.predictor import BasePredictor
 from ultralytics.yolo.utils import DEFAULT_CONFIG, ROOT, ops
 from ultralytics.yolo.utils.checks import check_imgsz
 from ultralytics.yolo.utils.plotting import Annotator, colors, save_one_box
+from generate_heatmap import generate_heatmap
 
 import cv2
 from deep_sort_pytorch.utils.parser import get_config
@@ -347,6 +348,32 @@ class DetectionPredictor(BasePredictor):
             else:
                 return "north"
 
+    def run_generate_heatmap(self):
+    
+        save_dir = str(self.save_dir)
+        coords_file = str(Path(save_dir) / "occlusion_coords.json")
+        first_appearance_file = str(Path(save_dir) / "first_appearance_coords.json")
+        movement_directions_file = str(Path(save_dir) / "movement_directions.json")
+        output_file = str(Path(save_dir) / "heatmap.png")
+        output_file2 = str(Path(save_dir) / "heatmap2.png")
+        grid_output_file = str(Path(save_dir) / "grid_counts.json")
+        contaminated_output_file = str(Path(save_dir) / "contaminated_squares.json")
+    
+    # Import and run generate_heatmap directly instead of subprocess
+    
+        generate_heatmap(
+            coords_file=coords_file,
+            first_appearance_file=first_appearance_file,
+            movement_directions_file=movement_directions_file,
+            output_file=output_file,
+            output_file2=output_file2,
+            img_shape=(720, 1280, 3),  # Adjust to your video dimensions
+            dot_size=2,
+            grid_size=16,
+            grid_output_file=grid_output_file,
+            contaminated_output_file=contaminated_output_file
+        )            
+
 
 @hydra.main(version_base=None, config_path=str(DEFAULT_CONFIG.parent), config_name=DEFAULT_CONFIG.name)
 def predict(cfg):
@@ -356,6 +383,7 @@ def predict(cfg):
     cfg.source = cfg.source if cfg.source is not None else ROOT / "assets"
     predictor = DetectionPredictor(cfg)
     predictor()
+    predictor.run_generate_heatmap()
 
 
 if __name__ == "__main__":

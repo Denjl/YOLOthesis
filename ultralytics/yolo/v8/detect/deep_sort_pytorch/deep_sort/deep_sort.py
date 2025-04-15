@@ -9,40 +9,51 @@ from .sort.tracker import Tracker
 
 __all__ = ['DeepSort']
 
-
+# Inicializácia Deep SORT algoritmu
 class DeepSort(object):
+    # Inicializácia DeepSORT sledovača
     def __init__(self, model_path, max_dist=0.2, min_confidence=0.3, nms_max_overlap=1.0, max_iou_distance=0.7, max_age=70, n_init=3, nn_budget=100, use_cuda=True):
         self.min_confidence = min_confidence
         self.nms_max_overlap = nms_max_overlap
 
+        # Inicializácia extraktora príznakov z hlbokej neurónovej siete
         self.extractor = Extractor(model_path, use_cuda=use_cuda)
 
+        # Nastavenie metriky vzdialenosti pre porovnávanie príznakov
         max_cosine_distance = max_dist
         metric = NearestNeighborDistanceMetric(
             "cosine", max_cosine_distance, nn_budget)
+
+        # Inicializácia sledovača s nastavenou metrikou    
         self.tracker = Tracker(
             metric, max_iou_distance=max_iou_distance, max_age=max_age, n_init=n_init)
 
+        # Slovník na sledovanie stavu oklúzie pre každý sledovaný objekt
         self.occlusion_status = {} ##
 
+    # Aktualizuje stav sledovača s novými detekciami
     def update(self, bbox_xywh, confidences, oids, ori_img):
         self.height, self.width = ori_img.shape[:2]
-        # generate detections
-        features = self._get_features(bbox_xywh, ori_img)
-        bbox_tlwh = self._xywh_to_tlwh(bbox_xywh)
+
+        # Generovanie detekcií
+        features = self._get_features(bbox_xywh, ori_img) # Extrakcia príznakov z výrezov obrázka
+        bbox_tlwh = self._xywh_to_tlwh(bbox_xywh) # Konverzia formátu ohraničujúcich rámčekov
+
+        # Vytvorenie objektov Detection pre každú detekciu s dostatočnou istotou
         detections = [Detection(bbox_tlwh[i], conf, features[i],oid) for i, (conf,oid) in enumerate(zip(confidences,oids)) if conf > self.min_confidence]
 
-        # run on non-maximum supression
+        # Príprava dát pre non-maximum suppression (nie je implementovaná v tomto kóde)
         boxes = np.array([d.tlwh for d in detections])
         scores = np.array([d.confidence for d in detections])
 
-        # update tracker
+        # Aktualizácia sledovača
         self.tracker.predict()
         self.tracker.update(detections)
 
-        # output bbox identities
+        # Príprava výstupných dát
         outputs = []
         for track in self.tracker.tracks:
+             # Ignorovanie nepotvrdených stôp alebo stôp, ktoré neboli aktualizované dlhšie ako 1 snímku
             if not track.is_confirmed() or track.time_since_update > 1:
                 continue
             box = track.to_tlwh()
@@ -51,9 +62,10 @@ class DeepSort(object):
             track_oid = track.oid
             outputs.append(np.array([x1, y1, x2, y2, track_id, track_oid], dtype=int))
 
-            ## Update occlusion status
+            # Aktualizácia stavu oklúzie
             if track_id not in self.occlusion_status:
                 self.occlusion_status[track_id] = False
+            # Ak stopa nebola aktualizovaná v aktuálnej snímke, označíme ju ako prekrytú (occluded)    
             if track.time_since_update > 0:
                 self.occlusion_status[track_id] = True
             else:
@@ -63,14 +75,11 @@ class DeepSort(object):
             outputs = np.stack(outputs, axis=0)
         return outputs
 
+    # Získanie stavu oklúzie pre daný sledovaný objekt
     def get_occlusion_status(self, track_id):
         return self.occlusion_status.get(track_id, False)
 
-    """
-    TODO:
-        Convert bbox from xc_yc_w_h to xtl_ytl_w_h
-    Thanks JieChen91@github.com for reporting this bug!
-    """
+    # Konverzia formátu ohraničujúcich rámčekov z xywh na tlwh
     @staticmethod
     def _xywh_to_tlwh(bbox_xywh):
         if isinstance(bbox_xywh, np.ndarray):
@@ -81,6 +90,7 @@ class DeepSort(object):
         bbox_tlwh[:, 1] = bbox_xywh[:, 1] - bbox_xywh[:, 3] / 2.
         return bbox_tlwh
 
+    # Konverzia formátu ohraničujúcich rámčekov z xywh na xyxy
     def _xywh_to_xyxy(self, bbox_xywh):
         x, y, w, h = bbox_xywh
         x1 = max(int(x - w / 2), 0)
@@ -89,12 +99,8 @@ class DeepSort(object):
         y2 = min(int(y + h / 2), self.height - 1)
         return x1, y1, x2, y2
 
+    # Konverzia formátu ohraničujúcich rámčekov z tlwh na xyxy
     def _tlwh_to_xyxy(self, bbox_tlwh):
-        """
-        TODO:
-            Convert bbox from xtl_ytl_w_h to xc_yc_w_h
-        Thanks JieChen91@github.com for reporting this bug!
-        """
         x, y, w, h = bbox_tlwh
         x1 = max(int(x), 0)
         x2 = min(int(x+w), self.width - 1)
@@ -102,9 +108,11 @@ class DeepSort(object):
         y2 = min(int(y+h), self.height - 1)
         return x1, y1, x2, y2
 
+    # Zvýši vek všetkých stôp v sledovači.
     def increment_ages(self):
         self.tracker.increment_ages()
 
+    # Konverzia formátu ohraničujúcich rámčekov z xyxy na tlwh
     def _xyxy_to_tlwh(self, bbox_xyxy):
         x1, y1, x2, y2 = bbox_xyxy
 
@@ -114,6 +122,7 @@ class DeepSort(object):
         h = int(y2 - y1)
         return t, l, w, h
 
+    # Extrakcia príznakov z výrezov obrázka
     def _get_features(self, bbox_xywh, ori_img):
         im_crops = []
         for box in bbox_xywh:

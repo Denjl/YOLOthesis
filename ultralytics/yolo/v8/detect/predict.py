@@ -1,6 +1,7 @@
 # Ultralytics YOLO 🚀, GPL-3.0 license
 import json
 
+# Importy potrebné pre rôzne funkcie, ako je spracovanie obrázkov, sledovanie objektov a generovanie heatmapy
 import hydra
 import torch
 import argparse
@@ -22,22 +23,26 @@ from deep_sort_pytorch.utils.parser import get_config
 from deep_sort_pytorch.deep_sort import DeepSort
 from collections import deque
 import numpy as np
+
+# Paleta farieb pre vizualizáciu
 palette = (2 ** 11 - 1, 2 ** 15 - 1, 2 ** 20 - 1)
 data_deque = {}
 
 deepsort = None
 
+# Inicializácia sledovača DeepSort
 def init_tracker():
     global deepsort
     cfg_deep = get_config()
     cfg_deep.merge_from_file("deep_sort_pytorch/configs/deep_sort.yaml")
 
+    # Nastavenie parametrov DeepSort sledovača
     deepsort= DeepSort(cfg_deep.DEEPSORT.REID_CKPT,
                             max_dist=cfg_deep.DEEPSORT.MAX_DIST, min_confidence=cfg_deep.DEEPSORT.MIN_CONFIDENCE,
                             nms_max_overlap=cfg_deep.DEEPSORT.NMS_MAX_OVERLAP, max_iou_distance=cfg_deep.DEEPSORT.MAX_IOU_DISTANCE,
                             max_age=cfg_deep.DEEPSORT.MAX_AGE, n_init=cfg_deep.DEEPSORT.N_INIT, nn_budget=cfg_deep.DEEPSORT.NN_BUDGET,
                             use_cuda=True)
-##########################################################################################
+# Funkcia na konverziu súradníc z formátu xyxy na xywh
 def xyxy_to_xywh(*xyxy):
     """" Calculates the relative bounding box from absolute pixel values. """
     bbox_left = min([xyxy[0].item(), xyxy[2].item()])
@@ -49,7 +54,7 @@ def xyxy_to_xywh(*xyxy):
     w = bbox_w
     h = bbox_h
     return x_c, y_c, w, h
-
+# Funkcia na konverziu súradníc z formátu xyxy na tlwh
 def xyxy_to_tlwh(bbox_xyxy):
     tlwh_bboxs = []
     for i, box in enumerate(bbox_xyxy):
@@ -62,6 +67,7 @@ def xyxy_to_tlwh(bbox_xyxy):
         tlwh_bboxs.append(tlwh_obj)
     return tlwh_bboxs
 
+# Funkcia na výpočet farby pre rôzne triedy objektov
 def compute_color_for_labels(label):
     """
     Simple function that adds fixed color depending on the class
@@ -78,6 +84,7 @@ def compute_color_for_labels(label):
         color = [int((p * (label ** 2 - label + 1)) % 255) for p in palette]
     return tuple(color)
 
+# Funkcia na vykreslenie okrajov okolo textu
 def draw_border(img, pt1, pt2, color, thickness, r, d):
     x1,y1 = pt1
     x2,y2 = pt2
@@ -108,6 +115,7 @@ def draw_border(img, pt1, pt2, color, thickness, r, d):
     
     return img
 
+# Funkcia na vykreslenie jedného ohraničujúceho rámca na obrázku
 def UI_box(x, img, color=None, label=None, line_thickness=None):
     # Plots one bounding box on image img
     tl = line_thickness or round(0.002 * (img.shape[0] + img.shape[1]) / 2) + 1  # line/font thickness
@@ -123,15 +131,16 @@ def UI_box(x, img, color=None, label=None, line_thickness=None):
         cv2.putText(img, label, (c1[0], c1[1] - 2), 0, tl / 3, [225, 255, 255], thickness=tf, lineType=cv2.LINE_AA)
 
 
-
+# Funkcia na vykreslenie boxov a vizualizáciu objektov
 def draw_boxes(img, bbox, names, object_id, identities=None, confidences=None, offset=(0, 0)):
     height, width, _ = img.shape
-    # remove tracked point from buffer if object is lost
+
+    # Odstránenie ID, ktoré už nie sú sledované
     for key in list(data_deque):
         if key not in identities:
             data_deque.pop(key)
 
-    # Draw 16x16 grid
+    # Kreslenie mriežky 16x16
     num_rows, num_cols = 16, 16
     row_height = height // num_rows
     col_width = width // num_cols
@@ -144,6 +153,7 @@ def draw_boxes(img, bbox, names, object_id, identities=None, confidences=None, o
         x = j * col_width
         cv2.line(img, (x, 0), (x, height), (255, 255, 255), 1)        
 
+    # Kreslenie boxov pre každý detegovaný objekt
     for i, box in enumerate(bbox):
         x1, y1, x2, y2 = [int(i) for i in box]
         x1 += offset[0]
@@ -151,13 +161,13 @@ def draw_boxes(img, bbox, names, object_id, identities=None, confidences=None, o
         y1 += offset[1]
         y2 += offset[1]
 
-        # code to find center of bottom edge
+        # Výpočet stredu spodného okraja boxu
         center = (int((x2 + x1) / 2), int((y2 + y2) / 2))
 
-        # get ID of object
+        # Získanie ID objektu
         id = int(identities[i]) if identities is not None else 0
 
-        # create new buffer for new object
+        # Vytvorenie nového bufferu pre nový objekt
         if id not in data_deque:
             data_deque[id] = deque(maxlen=64)
         color = compute_color_for_labels(object_id[i])
@@ -165,44 +175,45 @@ def draw_boxes(img, bbox, names, object_id, identities=None, confidences=None, o
         conf = confidences[i] if confidences is not None else 0
         label = '{}{:d}'.format("", id) + ":" + '%s %.2f' % (obj_name, conf)
 
-        # add center to buffer
+        # Pridanie stredu do bufferu
         data_deque[id].appendleft(center)
         UI_box(box, img, label=label, color=color, line_thickness=2)
 
-        # draw trail
-        for i in range(1, len(data_deque[id])):
-            # check if on buffer value is none
+        # Kreslenie trajektórií
+        for i in range(1, len(data_deque[id])):          
             if data_deque[id][i - 1] is None or data_deque[id][i] is None:
                 continue
-            # generate dynamic thickness of trails
+            # Výpočet hrúbky pre trajektóriu
             thickness = int(np.sqrt(64 / float(i + i)) * 1.5)
-            # draw trails
+            # Kreslenie trajektórie
             cv2.line(img, data_deque[id][i - 1], data_deque[id][i], color, thickness)
 
-        # Display occlusion status
+        # Zobrazenie statusu "occluded"
         occlusion_status = deepsort.get_occlusion_status(id)
         if occlusion_status:
             cv2.putText(img, "Occluded", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2, cv2.LINE_AA)
 
     return img
 
-
+# Trieda na predikciu detekcií
 class DetectionPredictor(BasePredictor):
 
     def __init__(self, cfg):
         super().__init__(cfg)
-        self.first_appearance = {}  # Initialize first_appearance attribute
-        self.previous_positions = {}  # Initialize previous positions attribute
+        self.first_appearance = {}  # Inicializácia slovníka pre prvý výskyt objektov
+        self.previous_positions = {}  # Inicializácia slovníka pre predchádzajúce pozície objektov
 
     def get_annotator(self, img):
         return Annotator(img, line_width=self.args.line_thickness, example=str(self.model.names))
 
+    # Predspracovanie obrázkov
     def preprocess(self, img):
         img = torch.from_numpy(img).to(self.model.device)
         img = img.half() if self.model.fp16 else img.float()  # uint8 to fp16/32
         img /= 255  # 0 - 255 to 0.0 - 1.0
         return img
 
+    # Postprocesing obrázkov
     def postprocess(self, preds, img, orig_img):
         preds = ops.non_max_suppression(preds,
                                         self.args.conf,
@@ -216,17 +227,18 @@ class DetectionPredictor(BasePredictor):
 
         return preds
 
+    # Funkcia na spracovanie predikcií a ukladanie výsledkov
     def write_results(self, idx, preds, batch):
         p, im, im0 = batch
         all_outputs = []
         log_string = ""
-        occluded_objects = []  # List to store occluded objects
-        occlusion_coords = []  # List to store occlusion coordinates
-        first_appearance_coords = []  # List to store first appearance coordinates
-        movement_directions = {}  # Dictionary to store movement directions for each grid cell
+        occluded_objects = []  # Zoznam pre prekryté objekty
+        occlusion_coords = []  # Zoznam pre súradnice oklúzií
+        first_appearance_coords = []  # Zoznam pre súradnice prvého výskytu
+        movement_directions = {}  # Slovník pre smery pohybu v každej bunke mriežky
 
         if len(im.shape) == 3:
-            im = im[None]  # expand for batch dim
+            im = im[None]  
         self.seen += 1
         im0 = im0.copy()
         if self.webcam:  # batch_size >= 1
@@ -236,68 +248,74 @@ class DetectionPredictor(BasePredictor):
             frame = getattr(self.dataset, 'frame', 0)
 
         self.data_path = p
-        save_path = str(self.save_dir / p.name)  # im.jpg
+        save_path = str(self.save_dir / p.name)  # cesta k uloženiu obrázka
         self.txt_path = str(self.save_dir / 'labels' / p.stem) + ('' if self.dataset.mode == 'image' else f'_{frame}')
-        log_string += '%gx%g ' % im.shape[2:]  # print string
+        log_string += '%gx%g ' % im.shape[2:]  # výpis rozmerov
         self.annotator = self.get_annotator(im0)
 
         det = preds[idx]
         all_outputs.append(det)
         if len(det) == 0:
             return log_string
+
+        # Počítanie detekcií podľa tried    
         for c in det[:, 5].unique():
-            n = (det[:, 5] == c).sum()  # detections per class
+            n = (det[:, 5] == c).sum()  # počet detekcií pre triedu
             log_string += f"{n} {self.model.names[int(c)]}{'s' * (n > 1)}, "
-        # write
-        gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
+        # Príprava dát pre DeepSort
+        gn = torch.tensor(im0.shape)[[1, 0, 1, 0]] 
         xywh_bboxs = []
         confs = []
         oids = []
         outputs = []
+        # Spracovanie každej detekcie
         for *xyxy, conf, cls in reversed(det):
-            if int(cls) != 2:  # Filter to keep only "car" class (class ID 2), people is "0"
+            if int(cls) != 2:  # Filter iba pre triedu "car" (ID 2)
                 continue
             x_c, y_c, bbox_w, bbox_h = xyxy_to_xywh(*xyxy)
             xywh_obj = [x_c, y_c, bbox_w, bbox_h]
             xywh_bboxs.append(xywh_obj)
             confs.append(conf.item())
             oids.append(int(cls))
-        if len(xywh_bboxs) > 0:  # Check if there are any detections
+        if len(xywh_bboxs) > 0:  # Kontrola, či existujú detekcie
             xywhs = torch.Tensor(xywh_bboxs)
             confss = torch.Tensor(confs)
 
+            # Aktualizácia DeepSort sledovača
             outputs = deepsort.update(xywhs, confss, oids, im0)
             if len(outputs) > 0:
                 bbox_xyxy = outputs[:, :4]
                 identities = outputs[:, -2]
                 object_id = outputs[:, -1]
 
-                # Create a dictionary to map track IDs to confidence scores
+                # Vytvorenie slovníka pre mapovanie ID na skóre dôveryhodnosti
                 track_confidences = {track_id: conf for track_id, conf in zip(identities, confs)}
 
-                # Align confidences with tracked objects
+                # Zarovnanie dôveryhodností s ID objektov
                 aligned_confs = [track_confidences.get(track_id, 0) for track_id in identities]
 
+                # Vykreslenie boxov a trajektórií
                 draw_boxes(im0, bbox_xyxy, self.model.names, object_id, identities, confidences=aligned_confs)
 
-                # Log occluded objects and first appearance coordinates
+                # Zaznamenávanie prekrytých objektov a súradníc prvého výskytu
                 for i, track_id in enumerate(identities):
                     if deepsort.get_occlusion_status(track_id):
+                        # Zaznamenanie prekrytého objektu
                         occluded_objects.append({
-                            'track_id': int(track_id),  # Convert to regular int
-                            'bbox': [int(coord) for coord in bbox_xyxy[i]],  # Convert to regular int
-                            'class': self.model.names[int(object_id[i])]  # Convert to regular int
+                            'track_id': int(track_id),  
+                            'bbox': [int(coord) for coord in bbox_xyxy[i]],  
+                            'class': self.model.names[int(object_id[i])] 
                         })
-                        # Log the center of the bounding box as the occlusion coordinate
+                        # Zaznamenanie stredu ohraničujúceho rámca ako súradnice oklúzie
                         x_center = (bbox_xyxy[i][0] + bbox_xyxy[i][2]) // 2
                         y_center = (bbox_xyxy[i][1] + bbox_xyxy[i][3]) // 2
                         occlusion_coords.append((x_center, y_center))
-                    # Log the first appearance coordinates
+                    # Zaznamenanie súradníc prvého výskytu objektu
                     if track_id not in self.first_appearance:
                         self.first_appearance[track_id] = (bbox_xyxy[i][0] + bbox_xyxy[i][2]) // 2, (bbox_xyxy[i][1] + bbox_xyxy[i][3]) // 2
                         first_appearance_coords.append(self.first_appearance[track_id])
 
-                    # Track movement direction
+                    # Sledovanie smeru pohybu objektu
                     current_position = (bbox_xyxy[i][0] + bbox_xyxy[i][2]) // 2, (bbox_xyxy[i][1] + bbox_xyxy[i][3]) // 2
                     if track_id in self.previous_positions:
                         prev_position = self.previous_positions[track_id]
@@ -310,25 +328,25 @@ class DetectionPredictor(BasePredictor):
                         movement_directions[grid_cell].append(direction)
                     self.previous_positions[track_id] = current_position
 
-        # Save occluded objects to a file (optional)
+        # Uloženie dát o prekrytých objektoch do súboru
         if occluded_objects:
             with open(self.save_dir / 'occluded_objects.json', 'a') as f:
                 json.dump(occluded_objects, f)
                 f.write('\n')
 
-        # Save occlusion coordinates to a file
+        # Uloženie súradníc oklúzie do súboru
         if occlusion_coords:
             with open(self.save_dir / 'occlusion_coords.json', 'a') as f:
                 json.dump([(int(x), int(y)) for x, y in occlusion_coords], f)
                 f.write('\n')
 
-        # Save first appearance coordinates to a file
+        # Uloženie súradníc prvého výskytu do súboru
         if first_appearance_coords:
             with open(self.save_dir / 'first_appearance_coords.json', 'a') as f:
                 json.dump([(int(x), int(y)) for x, y in first_appearance_coords], f)
                 f.write('\n')
 
-        # Save movement directions to a file
+        # Uloženie smerov pohybu do súboru
         if movement_directions:
             with open(self.save_dir / 'movement_directions.json', 'a') as f:
                 json.dump({str(k): v for k, v in movement_directions.items()}, f)
@@ -339,14 +357,14 @@ class DetectionPredictor(BasePredictor):
     def calculate_direction(self, dx, dy):
         if abs(dx) > abs(dy):
             if dx > 0:
-                return "east"
+                return "east" # východ
             else:
-                return "west"
+                return "west" # západ
         else:
             if dy > 0:
-                return "south"
+                return "south" # juh
             else:
-                return "north"
+                return "north" # sever
 
     def run_generate_heatmap(self):
     
@@ -359,7 +377,7 @@ class DetectionPredictor(BasePredictor):
         grid_output_file = str(Path(save_dir) / "grid_counts.json")
         contaminated_output_file = str(Path(save_dir) / "contaminated_squares.json")
     
-    # Import and run generate_heatmap directly instead of subprocess
+    # Priame volanie funkcie generate_heatmap namiesto použitia subprocess
     
         generate_heatmap(
             coords_file=coords_file,
@@ -367,24 +385,24 @@ class DetectionPredictor(BasePredictor):
             movement_directions_file=movement_directions_file,
             output_file=output_file,
             output_file2=output_file2,
-            img_shape=(720, 1280, 3),  # Adjust to your video dimensions
+            img_shape=(720, 1280, 3),  # Prispôsobte rozmerom vášho videa
             dot_size=2,
             grid_size=16,
             grid_output_file=grid_output_file,
             contaminated_output_file=contaminated_output_file
         )            
 
-
+# Hlavná funkcia, ktorá spúšťa predikciu pomocou Hydra frameworku
 @hydra.main(version_base=None, config_path=str(DEFAULT_CONFIG.parent), config_name=DEFAULT_CONFIG.name)
 def predict(cfg):
-    init_tracker()
-    cfg.model = cfg.model or "yolov8n.pt"
-    cfg.imgsz = check_imgsz(cfg.imgsz, min_dim=2)  # check image size
-    cfg.source = cfg.source if cfg.source is not None else ROOT / "assets"
-    predictor = DetectionPredictor(cfg)
-    predictor()
-    predictor.run_generate_heatmap()
+    init_tracker() # Inicializácia DeepSort sledovača
+    cfg.model = cfg.model or "yolov8n.pt" # Použitie predvoleného modelu, ak nie je špecifikovaný
+    cfg.imgsz = check_imgsz(cfg.imgsz, min_dim=2)  # Kontrola veľkosti obrázka
+    cfg.source = cfg.source if cfg.source is not None else ROOT / "assets" # Určenie zdroja dát
+    predictor = DetectionPredictor(cfg) # Vytvorenie prediktora
+    predictor() # Spustenie predikcie
+    predictor.run_generate_heatmap()  # Generovanie tepelných máp po dokončení predikcie
 
-
+# Spustenie hlavnej funkcie, ak je skript spustený priamo
 if __name__ == "__main__":
     predict()
